@@ -12,14 +12,37 @@ Aerial – Minetest mod that allows characters to fly with equipped wings
 aerial = {
 	name = "aerial",
 	wings = {},
-	flight = {}
+	flight = {},
+	materials = {}
 }
+
+if minetest.get_modpath("mcl_core") then
+	aerial.materials = {
+		wood = "mcl_core:wood",
+		cactus = "mcl_core:cactus",
+		steel = "mcl_core:iron_ingot",
+		gold = "mcl_core:gold_ingot",
+		diamond = "mcl_core:diamond"
+	}
+else
+	aerial.materials = {
+		wood = "default:wood",
+		cactus = "default:cactus",
+		bronze = "default:bronze_ingot",
+		steel = "default:steel_ingot",
+		gold = "default:gold_ingot",
+		diamond = "default:diamond"
+	}
+end
 
 -- i18n
 local S = minetest.get_translator(minetest.get_current_modname())
 
 -- Optional mod dependencies
 local dependencies = {
+	mcl = {
+		enabled = minetest.get_modpath("mcl_core")
+	},
 	stamina = {
 		enabled = (
 			minetest.settings:get_bool("aerial_stamina_enabled",true)
@@ -44,103 +67,114 @@ if minetest.global_exists("armor") and armor.elements then
 end
 
 -- Create wing registration mechanism
-aerial.register_wings = function(material,description,flammable,jump,flyspeed)
-	-- Define wing values
-	local wingname = aerial.name .. ":wings_" .. material
-	local wing = {
-		description = S(description),
-		inventory_image = "aerial_inv_wings_" .. material .. ".png",
-		groups = {
-			armor_wings = 1,
-			armor_heal = 0,
-			armor_use = 0,
-			armor_feather = 1,
-			physics_jump = dependencies.player_monoids.enabled and 0 or jump,
-			flammable = flammable
-		},
-		armor_groups = {},
-		damage_groups = {},
-		flyspeed = flyspeed,
-		jump = jump,
-		name = wingname,
-		can_fly = (flyspeed ~= 0)
-	}
+aerial.register_wings = function(material, description, flammable, jump, flyspeed)
+    -- Define wing values
+    local wingname = aerial.name .. ":wings_" .. material
+    local wing = {
+        description = S(description),
+        inventory_image = "aerial_inv_wings_" .. material .. ".png",
+        groups = {
+            armor_wings = 1,
+            armor_heal = 0,
+            armor_use = 0,
+            armor_feather = 1,
+            physics_jump = dependencies.player_monoids.enabled and 0 or jump,
+            flammable = flammable
+        },
+        armor_groups = {},
+        damage_groups = {},
+        flyspeed = flyspeed,
+        jump = jump,
+        name = wingname,
+        can_fly = (flyspeed ~= 0)
+    }
 
-	-- Save wing in a defined set of wings
-	aerial.wings[wingname] = wing
+    -- Save wing in a defined set of wings
+    aerial.wings[wingname] = wing
 
-	-- Register wing with 3D Armor
-	armor:register_armor(wingname,wing)
-
-	-- Register wing crafting recipe
-	local n = armor.materials[material]
-	minetest.register_craft({
-		output = wingname,
-		recipe = {
-			{n, "", n},
-			{n,  n, n},
-			{n, "", n}
-		},
-	})
-
-	-- Register wing as fuel if it's flammable
-	if flammable > 0 then
-		minetest.register_craft({
-			type = "fuel",
-			recipe = wingname,
-			burntime = 8,
-		})
-	end
-
-	-- Register wing visual entity
-	minetest.register_entity(wingname, {
-		visual = 'mesh',
-		mesh = 'wings.b3d',
-		visual_size = {x=8, y=8},
-		collisionbox = {0},
-		physical = false,
-		backface_culling = false,
-		pointable = false,
-		textures = {"aerial_uv_wings_" .. material .. ".png"},
-
-		on_activate = function(self, staticdata)
-			minetest.after(.1, function()
-					local parent = self.object:get_attach()
-					if not parent then
-						self.object:remove()
+    -- Conditional check for 3d_armor or mcl_armor
+    if dependencies.mcl.enabled then
+        -- MineClone2 armor registration
+        minetest.register_tool(wingname, {
+            description = wing.description,
+            inventory_image = wing.inventory_image,
+            _mcl_armor_element = "torso",
+            _mcl_armor_texture = "aerial_uv_wings_" .. material .. ".png",
+            _mcl_armor_points = { torso = wing.flyspeed > 0 and 2 or 0 },
+            _on_equip = function(obj, itemstack)
+				if obj and obj:is_player() then
+					Flight.get(obj):equip(wing)
+				end
+			end,
+			_on_unequip = function(obj, itemstack)
+				if obj and obj:is_player() then
+					local flight = Flight.get(obj)
+					if flight then
+						flight:unequip(wing)
 					end
-			end)
-		end,
-	})
+				end
+			end,			
+            groups = wing.groups
+        })
+    elseif minetest.global_exists("armor") and armor.elements then
+        -- 3D Armor registration
+        armor:register_armor(wingname, wing)
+    else
+        minetest.log("warning", "[Aerial] No compatible armor mod found. Wings will not be registered.")
+    end
+
+    -- Common code for both armor systems: Register wing crafting recipe
+    local n = dependencies.mcl.enabled and aerial.materials[material]
+    minetest.register_craft({
+        output = wingname,
+        recipe = {
+            {n, "", n},
+            {n, n, n},
+            {n, "", n}
+        },
+    })
+
+    -- Register wing as fuel if it's flammable
+    if flammable > 0 then
+        minetest.register_craft({
+            type = "fuel",
+            recipe = wingname,
+            burntime = 8,
+        })
+    end
 end
 
+
+
 -- Create wood wings
-if armor.materials.wood and minetest.settings:get_bool("aerial_wings_wood",true) then
+if aerial.materials.wood and minetest.settings:get_bool("aerial_wings_wood",true) then
 	aerial.register_wings("wood","Wooden Wings",1,0,0)
 end
 
 -- Create cactus wings
-if armor.materials.cactus and minetest.settings:get_bool("aerial_wings_cactus",true) then
+if aerial.materials.cactus and minetest.settings:get_bool("aerial_wings_cactus",true) then
 	aerial.register_wings("cactus","Cactus Wings",1,0,0)
 end
 
--- Create bronze wings
-if armor.materials.bronze and minetest.settings:get_bool("aerial_wings_bronze",true) then
-	aerial.register_wings("bronze","Bronze Wings",0,0.5,-0.1)
+if minetest.get_modpath("default") then
+	-- Create bronze wings
+	if aerial.materials.bronze and minetest.settings:get_bool("aerial_wings_bronze",true) then
+		aerial.register_wings("bronze","Bronze Wings",0,0.5,-0.1)
+	end
 end
 
 -- Create steel wings
-if armor.materials.steel and minetest.settings:get_bool("aerial_wings_steel",true) then
+if aerial.materials.steel and minetest.settings:get_bool("aerial_wings_steel",true) then
 	aerial.register_wings("steel","Steel Wings",0,0.6,0.5)
 end
 
 -- Create gold wings
-if armor.materials.gold and minetest.settings:get_bool("aerial_wings_gold",true) then
+if aerial.materials.gold and minetest.settings:get_bool("aerial_wings_gold",true) then
 	aerial.register_wings("gold","Golden Wings",0,1,1.4)
 end
 
 -- Create diamond wings
-if armor.materials.diamond and minetest.settings:get_bool("aerial_wings_diamond",true) then
+if aerial.materials.diamond and minetest.settings:get_bool("aerial_wings_diamond",true) then
 	aerial.register_wings("diamond","Diamond Wings",0,1.5,2)
 end
 
@@ -371,26 +405,28 @@ minetest.register_globalstep(function(dtime)
 	end
 end)
 
--- Register handler for when wings are equipped
-armor:register_on_equip(function(player, index, stack)
-	local wing = aerial.wings[stack:get_name()]
-	if wing then
-		Flight.get(player):equip(wing)
-	end
-end)
-
--- Register handler for when wings are unequipped
-armor:register_on_unequip(function(player, index, stack)
-	local wing = aerial.wings[stack:get_name()]
-	if wing then
-		local flight = Flight.get(player)
-		if flight.swapped then
-			flight.swapped = false
-		else
-			flight:unequip(wing)
+if not dependencies.mcl.enabled then
+	-- Register handler for when wings are equipped
+	armor:register_on_equip(function(player, index, stack)
+		local wing = aerial.wings[stack:get_name()]
+		if wing then
+			Flight.get(player):equip(wing)
 		end
-	end
-end)
+	end)
+
+	-- Register handler for when wings are unequipped
+	armor:register_on_unequip(function(player, index, stack)
+		local wing = aerial.wings[stack:get_name()]
+		if wing then
+			local flight = Flight.get(player)
+			if flight.swapped then
+				flight.swapped = false
+			else
+				flight:unequip(wing)
+			end
+		end
+	end)
+end
 
 -- Register handler for player sprinting
 if dependencies.stamina.enabled then
